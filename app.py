@@ -367,7 +367,7 @@ if df is not None and len(df) > 0 and st.session_state.get("mapeo_ok"):
             try:
                 with st.spinner("Creando lista en Zoho…"):
                     lk = create_list_and_contacts(access, listname.strip(), description.strip(), first_batch, signupform=signupform)
-                st.success(f"Lista creada/obtenida ✅  listkey = {lk}")
+                st.success(f"Lista creada/obtenida ✅")
 
 
                 remaining_emails = emails_valid[len(first_batch):]
