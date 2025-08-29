@@ -339,7 +339,10 @@ if df is not None and len(df) > 0 and st.session_state.get("mapeo_ok"):
                     errors += 1
             time.sleep(SLEEP_SINGLE)
             prog2.progress((idx+1)/total_rows, text="Enriqueciendo…")
-        st.success(f"✅ Terminado. listkey={listkey}  Enriquecidos={updated}  Errores={errors}")
+
+        # ahora devolvemos los números para que el caller arme el mensaje final
+        return updated, errors
+
 
     # Elección de modo
     mode = st.radio("¿Qué deseas hacer?", ["Crear lista nueva", "Usar una existente"], horizontal=True)
@@ -362,9 +365,10 @@ if df is not None and len(df) > 0 and st.session_state.get("mapeo_ok"):
             signupform = "private" if private else "public"
 
             try:
-                with st.status("Creando lista en Zoho…", expanded=True) as status:
+                with st.spinner("Creando lista en Zoho…"):
                     lk = create_list_and_contacts(access, listname.strip(), description.strip(), first_batch, signupform=signupform)
-                    status.update(label=f"Lista creada/obtenida ✅ listkey = {lk}")
+                st.success(f"Lista creada/obtenida ✅  listkey = {lk}")
+
 
                 remaining_emails = emails_valid[len(first_batch):]
                 total_batches = math.ceil(len(remaining_emails) / BATCH_SIZE) if remaining_emails else 0
@@ -391,9 +395,12 @@ if df is not None and len(df) > 0 and st.session_state.get("mapeo_ok"):
                 else:
                     st.info("No hay correos restantes para cargar en bulk.")
 
-                enrich_all(lk)
-                if private:
-                    st.info("Para no enviar correos de confirmación, mantén la lista como PRIVATE (sin signup form).")
+                updated, errors = enrich_all(lk)
+
+                st.success("Contactos cargados exitosamente.")
+                st.write(f"Contactos cargados = {updated}")
+                st.write(f"Errores = {errors}")
+
 
             except Exception as e:
                 st.error(f"Error en creación/carga: {e}")
@@ -445,8 +452,12 @@ if df is not None and len(df) > 0 and st.session_state.get("mapeo_ok"):
                             time.sleep(SLEEP_BULK)
                             prog.progress((i+1)/total_batches, text="Cargando emails en lotes…")
 
-                    enrich_all(lk_selected)
-                    st.info("Si no quieres correos de confirmación, usa listas PRIVATE (sin signup form).")
+                    updated, errors = enrich_all(lk_selected)
+
+                    st.success("Contactos cargados exitosamente.")
+                    st.write(f"Contactos cargados = {updated}")
+                    st.write(f"Errores = {errors}")
+
 
                 except Exception as e:
                     st.error(f"Error cargando a lista existente: {e}")
