@@ -130,22 +130,15 @@ def upsert_contact_fields(access_token: str, listkey: str, contactinfo: Dict) ->
 EMAILAPI_BASE = f"https://campaigns.zoho.{DC}/emailapi/v2"
 
 def list_templates(access_token: str, start_index: int = 1, end_index: int = 200):
-    """Devuelve lista de templates [{'template_id','template_name', ...}]"""
+    """
+    Devuelve una lista de plantillas:
+    [{'template_id': '...', 'template_name': '...', ...}, ...]
+    """
     url = f"{EMAILAPI_BASE}/templates?start_index={start_index}&end_index={end_index}"
     r = requests.get(url, headers={"Authorization": f"Zoho-oauthtoken {access_token}"}, timeout=30)
     r.raise_for_status()
     data = r.json()
     return data.get("templates", []) or []
-
-def get_template_html(access_token: str, template_id: str) -> str:
-    """Devuelve el HTML del template (o None si es de texto plano)."""
-    url = f"{EMAILAPI_BASE}/templates/{template_id}"
-    r = requests.get(url, headers={"Authorization": f"Zoho-oauthtoken {access_token}"}, timeout=30)
-    r.raise_for_status()
-    info = r.json()
-    if info.get("content_type") == "html":
-        return info.get("content") or ""
-    return ""
 
 
 # =========================
@@ -486,43 +479,48 @@ if df is not None and len(df) > 0 and st.session_state.get("mapeo_ok"):
                 except Exception as e:
                     st.error(f"Error cargando a lista existente: {e}")
 
-# ========= PASO 4: Previsualizar plantillas guardadas =========
-st.header("④ Previsualizar plantillas guardadas (Email API)")
+
+# ========= PASO 4: Plantillas guardadas (solo listado/desplegable) =========
+st.header("④ Plantillas guardadas (Templates API v2)")
 
 try:
-    # Reutilizamos 'access' si ya lo tienes; si no, renovamos.
-    access_templates = access if 'access' in locals() else get_access_token()
-    # Trae primeras N plantillas (ajusta el rango si tienes muchas)
-    templates = list_templates(access_templates, start_index=1, end_index=200)
-    if not templates:
-        st.info("No se encontraron plantillas en tu cuenta (o no tienes habilitado Email API).")
-    else:
-        # Construir opciones legibles
-        options = {
-            f"{t.get('template_name','(sin nombre)')} — ID: {t.get('template_id')}": t.get('template_id')
-            for t in templates
-        }
-        sel_label = st.selectbox("Selecciona una plantilla", list(options.keys()))
-        alto_iframe = st.number_input("Alto del visor (px)", min_value=300, value=900, step=50)
+    # Reutiliza 'access' si ya existe; si no, renueva
+    access_tpl = access if 'access' in locals() else get_access_token()
 
-        if st.button("Mostrar plantilla"):
-            tpl_id = options.get(sel_label)
-            try:
-                html = get_template_html(access_templates, tpl_id)
-                if not html:
-                    st.warning("La plantilla seleccionada no es HTML o no devolvió contenido.")
-                else:
-                    st.success("Plantilla cargada.")
-                    # Render del HTML como se guardó en Campaigns
-                    st.components.v1.html(html, height=alto_iframe, scrolling=True)
-            except requests.HTTPError as e:
-                status = e.response.status_code if e.response is not None else "?"
-                st.error(f"Error {status} al obtener la plantilla: {getattr(e.response,'text',e)}")
-            except Exception as e:
-                st.error(f"Error mostrando la plantilla: {e}")
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        start_idx = st.number_input("start_index", min_value=1, value=1, step=1)
+    with c2:
+        end_idx = st.number_input("end_index", min_value=start_idx, value=start_idx + 199, step=1)
+
+    if st.button("Listar plantillas"):
+        try:
+            templates = list_templates(access_tpl, start_index=start_idx, end_index=end_idx)
+            if not templates:
+                st.info("No se encontraron plantillas en ese rango (o Email API no habilitada).")
+            else:
+                # Construye el desplegable
+                options = {
+                    f"{t.get('template_name','(sin nombre)')} — ID: {t.get('template_id')}": t.get('template_id')
+                    for t in templates
+                }
+                sel = st.selectbox("Selecciona una plantilla", list(options.keys()))
+                st.success("Plantillas cargadas.")
+
+                # Tabla compacta con nombre e ID (opcional)
+                show_table = st.checkbox("Mostrar tabla de plantillas", value=False)
+                if show_table:
+                    df_tpl = pd.DataFrame(
+                        [{"Template Name": t.get("template_name"), "Template ID": t.get("template_id")} for t in templates]
+                    )
+                    st.dataframe(df_tpl, use_container_width=True)
+
+        except requests.HTTPError as e:
+            st.error(f"Error {e.response.status_code if e.response is not None else '?'} listando plantillas: {getattr(e.response, 'text', e)}")
+        except Exception as e:
+            st.error(f"Error listando plantillas: {e}")
 
 except requests.HTTPError as e:
-    status = e.response.status_code if e.response is not None else "?"
-    st.error(f"Error {status} listando plantillas: {getattr(e.response,'text',e)}")
+    st.error(f"Error {e.response.status_code if e.response is not None else '?'} autenticando para templates: {getattr(e.response,'text',e)}")
 except Exception as e:
-    st.error(f"No se pudieron listar plantillas: {e}")
+    st.error(f"No se pudo preparar la sección de plantillas: {e}")
