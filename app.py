@@ -125,6 +125,30 @@ def upsert_contact_fields(access_token: str, listkey: str, contactinfo: Dict) ->
     return r.json()
 
 # =========================
+# Helpers Email API (Templates v2)
+# =========================
+EMAILAPI_BASE = f"https://campaigns.zoho.{DC}/emailapi/v2"
+
+def list_templates(access_token: str, start_index: int = 1, end_index: int = 200):
+    """Devuelve lista de templates [{'template_id','template_name', ...}]"""
+    url = f"{EMAILAPI_BASE}/templates?start_index={start_index}&end_index={end_index}"
+    r = requests.get(url, headers={"Authorization": f"Zoho-oauthtoken {access_token}"}, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    return data.get("templates", []) or []
+
+def get_template_html(access_token: str, template_id: str) -> str:
+    """Devuelve el HTML del template (o None si es de texto plano)."""
+    url = f"{EMAILAPI_BASE}/templates/{template_id}"
+    r = requests.get(url, headers={"Authorization": f"Zoho-oauthtoken {access_token}"}, timeout=30)
+    r.raise_for_status()
+    info = r.json()
+    if info.get("content_type") == "html":
+        return info.get("content") or ""
+    return ""
+
+
+# =========================
 # UI
 # =========================
 st.set_page_config(page_title="Zoho Campaigns: Cargar contactos", page_icon="📧", layout="wide")
@@ -461,3 +485,44 @@ if df is not None and len(df) > 0 and st.session_state.get("mapeo_ok"):
 
                 except Exception as e:
                     st.error(f"Error cargando a lista existente: {e}")
+
+# ========= PASO 4: Previsualizar plantillas guardadas =========
+st.header("④ Previsualizar plantillas guardadas (Email API)")
+
+try:
+    # Reutilizamos 'access' si ya lo tienes; si no, renovamos.
+    access_templates = access if 'access' in locals() else get_access_token()
+    # Trae primeras N plantillas (ajusta el rango si tienes muchas)
+    templates = list_templates(access_templates, start_index=1, end_index=200)
+    if not templates:
+        st.info("No se encontraron plantillas en tu cuenta (o no tienes habilitado Email API).")
+    else:
+        # Construir opciones legibles
+        options = {
+            f"{t.get('template_name','(sin nombre)')} — ID: {t.get('template_id')}": t.get('template_id')
+            for t in templates
+        }
+        sel_label = st.selectbox("Selecciona una plantilla", list(options.keys()))
+        alto_iframe = st.number_input("Alto del visor (px)", min_value=300, value=900, step=50)
+
+        if st.button("Mostrar plantilla"):
+            tpl_id = options.get(sel_label)
+            try:
+                html = get_template_html(access_templates, tpl_id)
+                if not html:
+                    st.warning("La plantilla seleccionada no es HTML o no devolvió contenido.")
+                else:
+                    st.success("Plantilla cargada.")
+                    # Render del HTML como se guardó en Campaigns
+                    st.components.v1.html(html, height=alto_iframe, scrolling=True)
+            except requests.HTTPError as e:
+                status = e.response.status_code if e.response is not None else "?"
+                st.error(f"Error {status} al obtener la plantilla: {getattr(e.response,'text',e)}")
+            except Exception as e:
+                st.error(f"Error mostrando la plantilla: {e}")
+
+except requests.HTTPError as e:
+    status = e.response.status_code if e.response is not None else "?"
+    st.error(f"Error {status} listando plantillas: {getattr(e.response,'text',e)}")
+except Exception as e:
+    st.error(f"No se pudieron listar plantillas: {e}")
