@@ -129,16 +129,49 @@ def upsert_contact_fields(access_token: str, listkey: str, contactinfo: Dict) ->
 # =========================
 EMAILAPI_BASE = f"https://campaigns.zoho.{DC}/emailapi/v2"
 
+def _auth_headers(access_token: str):
+    return {
+        "Authorization": f"Zoho-oauthtoken {access_token}",
+        "Accept": "application/json",
+    }
+
 def list_templates(access_token: str, start_index: int = 1, end_index: int = 200):
     """
-    Devuelve una lista de plantillas:
-    [{'template_id': '...', 'template_name': '...', ...}, ...]
+    Devuelve [{'template_id','template_name', ...}] o lanza Exception con detalle
+    si la respuesta no es JSON (p.ej. HTML por 401/403/404).
     """
     url = f"{EMAILAPI_BASE}/templates?start_index={start_index}&end_index={end_index}"
-    r = requests.get(url, headers={"Authorization": f"Zoho-oauthtoken {access_token}"}, timeout=30)
-    r.raise_for_status()
-    data = r.json()
-    return data.get("templates", []) or []
+    r = requests.get(url, headers=_auth_headers(access_token), timeout=30)
+
+    # Guarda datos útiles para depurar
+    status = r.status_code
+    ctype = r.headers.get("Content-Type", "")
+
+    if not r.ok:
+        # Levanta error pero con cuerpo adjunto
+        raise RuntimeError(f"HTTP {status} {url}\nContent-Type: {ctype}\nBody:\n{r.text[:800]}")
+
+    # Intenta parsear JSON; si no, muestra "body" crudo
+    try:
+        data = r.json()
+    except ValueError:
+        raise RuntimeError(f"Respuesta no-JSON (HTTP {status}, {ctype}). Body (primeros 800 chars):\n{r.text[:800]}")
+
+    templates = data.get("templates", [])
+    return templates or []
+
+def get_template_html(access_token: str, template_id: str) -> str:
+    url = f"{EMAILAPI_BASE}/templates/{template_id}"
+    r = requests.get(url, headers=_auth_headers(access_token), timeout=30)
+    status = r.status_code
+    ctype = r.headers.get("Content-Type", "")
+    if not r.ok:
+        raise RuntimeError(f"HTTP {status} {url}\nContent-Type: {ctype}\nBody:\n{r.text[:800]}")
+    try:
+        info = r.json()
+    except ValueError:
+        raise RuntimeError(f"Respuesta no-JSON (HTTP {status}, {ctype}). Body:\n{r.text[:800]}")
+    return info.get("content") if info.get("content_type") == "html" else ""
 
 
 # =========================
@@ -170,7 +203,7 @@ if uploaded:
             df = pd.read_csv(io.BytesIO(raw), encoding="latin-1")
         df = df.fillna("")
         st.success(f"CSV: {uploaded.name} — {len(df)} filas")
-        st.dataframe(df.head(20), use_container_width=True)
+        st.dataframe(df.head(20), width='stretch')
     except Exception as e:
         st.error(f"No se pudo leer el CSV: {e}")
 
@@ -497,28 +530,17 @@ try:
         try:
             templates = list_templates(access_tpl, start_index=start_idx, end_index=end_idx)
             if not templates:
-                st.info("No se encontraron plantillas en ese rango (o Email API no habilitada).")
+                st.info("No se encontraron plantillas en ese rango.")
             else:
-                # Construye el desplegable
                 options = {
                     f"{t.get('template_name','(sin nombre)')} — ID: {t.get('template_id')}": t.get('template_id')
                     for t in templates
                 }
                 sel = st.selectbox("Selecciona una plantilla", list(options.keys()))
                 st.success("Plantillas cargadas.")
-
-                # Tabla compacta con nombre e ID (opcional)
-                show_table = st.checkbox("Mostrar tabla de plantillas", value=False)
-                if show_table:
-                    df_tpl = pd.DataFrame(
-                        [{"Template Name": t.get("template_name"), "Template ID": t.get("template_id")} for t in templates]
-                    )
-                    st.dataframe(df_tpl, use_container_width=True)
-
-        except requests.HTTPError as e:
-            st.error(f"Error {e.response.status_code if e.response is not None else '?'} listando plantillas: {getattr(e.response, 'text', e)}")
         except Exception as e:
-            st.error(f"Error listando plantillas: {e}")
+            st.error(f"Error listando plantillas:\n{e}")
+
 
 except requests.HTTPError as e:
     st.error(f"Error {e.response.status_code if e.response is not None else '?'} autenticando para templates: {getattr(e.response,'text',e)}")
